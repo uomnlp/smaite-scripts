@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+
+  server:
+    volumes:
+      - ${PWD}/workers.txt:/usr/share/server/workers.txt
+    build:
+      context: .
+    ports:
+      - "8020:5000"
