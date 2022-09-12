@@ -26,15 +26,18 @@ def load_jsonl(path: str):
 @click.argument('file', default=sys.stdin)
 @click.option('--log-level', default='INFO')
 @click.option('--size', type=int, default=-1)
-@click.option('--corrupt-ratio', '--cr', type=float, default=0.2)
+@click.option('--corrupt-ratio', '-cr', type=float, default=0.2)
+@click.option('--max-len-article', '-ml', type=int, default=5000)
 @click.option('--shuffle', '--shuf', is_flag=True, default=False)
 @click.option('--seed', type=int, default=42)
-def main(file, log_level, size, corrupt_ratio, shuffle, seed):
+def main(file, log_level, max_len_article, size, corrupt_ratio, shuffle, seed):
     random.seed(seed)
     logger.remove(0)
     logger.add(sys.stderr, level=log_level)
     logger.debug(file)
     data = load_jsonl(file)
+    if max_len_article:
+        data = [d for d in data if len(d['text_article']) <= max_len_article]
     if shuffle:
         random.shuffle(data)
     data, rest = data[:size], data[:size]
