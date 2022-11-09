@@ -1,0 +1,340 @@
+style = """<script src="https://assets.crowd.aws/crowd-html-elements.js" xmlns=""></script>
+
+<style>
+    h3 {
+        margin-top: 10px;
+    }
+
+    crowd-card {
+        width: 100%;
+
+    }
+
+    .container {
+        display: grid;
+        grid-template-columns: 2fr 7fr 1fr;
+    }
+
+    .container > div {
+        margin: 10px;
+    }
+
+    .column {
+        display: grid;
+        grid-template-columns: auto;
+        grid-template-rows: minmax(150px, max-content) auto;
+    }
+
+    .card {
+        margin: 10px;
+        white-space: pre-wrap;
+    }
+
+    .radio-box {
+        margin-bottom: 20px;
+        height: fit-content;
+        padding-bottom: 10px;
+    }
+</style>
+
+<div id="errorBox"></div>
+"""
+html = """
+<crowd-form>
+    <short-instructions>
+        <p>Given the verdict and the claim, try to predict whether the claim is true, false or misleading or whether
+            it's hard to judge.</p>
+
+        <p>Once you did, read the article that the verdict summarises, and rate on a scale from 1 to 5, whether
+            the verdict is a good summary of the article.</p>
+        <p>
+            Make sure to read the full instructions!
+        </p>
+        <p>
+            You should take around 1 minute per HIT.
+        </p>
+    </short-instructions>
+
+    <full-instructions>
+        <h2>Instructions</h2>
+        <p>
+            We are collecting ratings for summaries of fact verification articles to study explainable automated
+            fact verification.
+        </p>
+        <p>
+            In this task, you will be asked to judge the quality of (automatically generated) summaries of
+            fact verification articles.
+        </p>
+        <p>
+            This is a <strong>qualification task</strong>. Once you submit, and we approve your HITs, we will
+            issue you with a corresponding qualification that will allow you to participate in the main task.
+        </p>
+
+        <h3>Example</h3>
+        <table>
+            <tr>
+                <td>
+                    <u>Claim:</u> A Pfizer document contains a list of around 158,000 adverse events 'from their
+                    vaccine'.
+                </td>
+            </tr>
+            <tr>
+                <td><u>Verdict:</u> No it doesn't. The document lists a mixture of reported adverse events following
+                    vaccination. Many may not have been caused by the vaccine.
+                </td>
+            </tr>
+            <tr>
+                <td><u>Article:</u> A widely shared article on the Express website about the safety of Pfizer's Covid-19
+                    vaccine is misleading in several ways.<br/>It incorrectly claims that a recently published document
+                    about adverse events following vaccination is the first time the public have been allowed to see the
+                    clinical trial data that Pfizer submitted to the US Food and Drug Administration (FDA) for the
+                    authorisation of the vaccine. In fact, much of the data in this document does not come from Pfizer's
+                    clinical trials, and some adverse event data from the trials has been publicly available on the FDA
+                    website at least since December 2020. [...]
+                </td>
+            </tr>
+        </table>
+        <h3>Details</h3>
+        <p>You will need to <i>(a)</i> judge, whether the claim is true, based on the verdict only. </p>
+        <p>Afterwards, you will need to <i>(b)</i> assign a numeric score from 1 to 5 based on how well you think
+            the verdict summarises the full article (where 5 is the best).
+            Note that the full article appears only after you have judged the explanation.</p>
+
+        <p>In judging the (reported) truthfulness of the claim:</p>
+        <ul>
+            <li>
+                please disregard your personal opinion about the claim. It does not matter whether <i>you</i> think
+                it's true, but rather what the verdict states.
+            </li>
+            <li>
+                Select <strong>True</strong>, if the verdict states that the claim is true without any caveats.
+            </li>
+            <li>
+                Select <strong>Mostly</strong>, if the verdict states that the claim is true but there are some
+                lacking information or imprecisions.
+            </li>
+            <li>
+                Select <strong>Half/Half</strong>, if the verdict states that the claim is a mixture of correct and
+                false
+                information, for example when there are two parts to the claim but only one is correct.
+            </li>
+            <li>
+                Select <strong>Mostly False</strong>, if the verdict states that the claim is mostly false, for example
+                when it
+                is based on something that is true in principle but draws the wrong conclusions.
+            </li>
+            <li>
+                Select <strong>False</strong>, if the verdict clearly states that the claim is false, incorrect, made up
+                etc.
+            </li>
+            <li>
+                Select <strong>Misleading</strong>, if the verdict states that the claim is misleading. This is the case
+                when the claim describes something that happened in principle (e.g. someone said something) but takes it
+                out of context, exaggerates it, attributes it to a wrong person, etc.
+            </li>
+            <li>
+                Select <strong>Satire</strong>, if the verdict states that the claim is clearly satire, for example as
+                it could originate satirical news outlets, such as "The Onion".
+            </li>
+            <li>
+                If the verdict provides ultimately conflicting/unclear information about the claim, select "Hard to
+                say".
+            </li>
+        </ul>
+
+        <p>In judging the quality,</p>
+        <ul>
+            <li>
+                When rating the quality of the summary, give the highest mark (5) when you <strong>cannot think of a way
+                to improve</strong> the summary. Give the lowest mark (1) if the summary is <strong>unrelated</strong>
+                to the article. For ratings in between, consider the following:
+                <ul>
+                    <li>Does the summary capture <strong>main idea</strong> of the article?</li>
+                    <li>Does the summary leave <strong>important information</strong> mentioned in the article?</li>
+                    <li>Does the summary <strong>"invent"</strong> new information, not mentioned in the article?</li>
+                </ul>
+            </li>
+        </ul>
+    </full-instructions>
+    <crowd-tabs id="crowd-tabs">
+    {}
+    </crowd-tabs>
+</crowd-form>"""
+
+functions = """<script>
+
+
+    function reset(i) {
+        document
+            .getElementById("firstForm"+i)
+            .querySelectorAll('input[name="rate"]').forEach((e) => e.checked = false);
+        document
+            .getElementById("firstForm"+i)
+            .querySelectorAll('input[name="verdict"]').forEach((e) => e.checked = false);
+        document.getElementById("right"+i).style = 'display: none;';
+    }
+
+    function uncoverSecondPart(i) {
+        document.getElementById("right" + i).style = '';
+    }
+
+    document.addEventListener('all-crowd-elements-ready', () => {
+        for (let i = 1; i <= 10; i++) {
+            document.getElementById('firstForm'+i).addEventListener("click", function (event) {
+                if (event.target && event.target.matches("input[type='radio']")) {
+                    uncoverSecondPart(i);
+                }
+            });
+        }
+        document.querySelector('crowd-form').onsubmit = function (event) {
+            errorBox.innerHTML = '';
+            let allChecked = makingSureChecked();
+            console.log(event);
+            console.log(allChecked);
+            if (!allChecked.every(elem => !!elem)) {
+                event.preventDefault();
+                let i = 1;
+                let errors = [];
+                allChecked.forEach(function (elem) {
+                    if (elem === false) {
+                        console.log(event);
+                        console.log(errorBox);
+                        errors.push("Please assign a rating to items in Tab " + i + "!");
+                    }
+                    i++;
+                })
+                errorBox.innerHTML = "<crowd-alert type='error'>" + errors.join('<br/>') + "</crowd-alert>";
+                errorBox.scrollIntoView();
+            }
+        };
+
+        const params = new URLSearchParams(window.location.search);
+
+        if (params.get('mode') !== "requester-preview") {
+            const workerID = params.get("workerId");
+            fetch('https://mturk.schlegel-online.de/?worker_id=' + workerID).then(function (response) {
+                return response.json();
+            }).then(function (data) {
+                console.log(data);
+                if (data === true) {
+                    alert("You have already obtained this qualification! " +
+                        "You can work on the full task instead! " +
+                        "If you continue to work on the qualification task, " +
+                        "your responses will be discarded and you won't get paid.");
+                }
+
+            }).catch(function (error) {
+                console.log(error);
+            });
+        } else {
+            console.log('Preview mode.');
+        }
+
+
+        function makingSureChecked() {
+            let result = [];
+            for (let j = 1; j <= 10; j++) {
+                const rates = document
+                    .getElementById("tab"+j)
+                    .querySelectorAll('input[name="rate' + j + '"]');
+                const verdicts = document
+                    .getElementById("tab"+j)
+                    .querySelectorAll('input[name="verdict' + j + '"]');
+                let rate_flag = false;
+                let verdict_flag = false;
+                for (let i = 0; i < rates.length; i++) {
+                    if (rates[i].checked) {
+                        rate_flag = true;
+                        break;
+                    }
+                }
+                for (let i = 0; i < verdicts.length; i++) {
+                    if (verdicts[i].checked) {
+                        verdict_flag = true;
+                        break;
+                    }
+                }
+                result.push(rate_flag && verdict_flag);
+            }
+            return result;
+        }
+    });
+
+</script>
+"""
+
+
+def render(i):
+    return f"""
+    <crowd-tab header="Tab {i}" id="tab{i}" class="container">
+        <div className='column' id="left{i}">
+            <div className="radio-box" id="firstForm{i}">
+                <h3>Looking at the verdict only, the claim is</h3>
+                <table>
+                    <tr>
+                        <td>
+                            <input type="radio" id="true{i}" name="verdict{i}" value="true"><label htmlFor="true{i}">True</label>
+                        </td>
+                        <td>
+                            <input type="radio" id="almost{i}" name="verdict{i}" value="almost"><label htmlFor="almost{i}">Mostly
+                                True</label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <input type="radio" id="half{i}" name="verdict{i}" value="half"><label htmlFor="half{i}">Half/Half</label>
+                        </td>
+                        <td>
+                            <input type="radio" id="hardly{i}" name="verdict{i}" value="hardly"><label htmlFor="hardly{i}">Mostly
+                                False</label>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><input type="radio" id="false{i}" name="verdict{i}" value="false"><label htmlFor="false{i}">False</label>
+                        </td>
+                        <td><input type="radio" id="misleading{i}" name="verdict{i}" value="misleading"><label htmlFor="misleading{i}">Misleading</label></td>
+                    </tr>
+                    <tr>
+                        <td><input type="radio" id="satire{i}" name="verdict{i}" value="satire"><label htmlFor="satire{i}">Satire</label></td>
+                        <td><input type="radio" id="unk{i}" name="verdict{i}" value="unk"><label htmlFor="unk{i}">Hard to say</label>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div>
+                <h3>Claim</h3>
+                <crowd-card>
+                    <div className="card">${{claim{i}}}</div>
+                </crowd-card>
+                <h3>Verdict</h3>
+                <crowd-card>
+                    <div className="card">${{verdict{i}}}</div>
+                </crowd-card>
+            </div>
+            <span onClick="reset({i});">Reset</span>
+        </div>
+    
+        <div className='column' id="right{i}" style="display: none">
+            <div className="radio-box">
+                <h3>Is the verdict a good summary of the article?</h3>
+                <input type="radio" id="rate0{i}" name="rate{i}" value="1"><label htmlFor="rate0{i}">1 (Unrelated)</label>
+                <input type="radio" id="rate1{i}" name="rate{i}" value="2"><label htmlFor="rate1{i}">2</label>
+                <input type="radio" id="rate2{i}" name="rate{i}" value="3"><label htmlFor="rate2{i}">3</label>
+                <input type="radio" id="rate3{i}" name="rate{i}" value="4"><label htmlFor="rate3{i}">4</label>
+                <input type="radio" id="rate4{i}" name="rate{i}" value="5"><label htmlFor="rate4{i}">5 (Ideal)</label>
+    
+            </div>
+            <div>
+                <h3>Article</h3>
+                <crowd-card>
+                    <div className="card">${{text{i}}}</div>
+                </crowd-card>
+            </div>
+        </div>
+    </crowd-tab>
+"""
+
+
+if __name__ == '__main__':
+    tabs = [render(i) for i in range(1, 11)]
+    print(style + html.format('\n'.join(tabs)) + functions)

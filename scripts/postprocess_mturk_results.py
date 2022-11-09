@@ -43,12 +43,16 @@ AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
 @click.option('--qualification-threshold', '-qt', type=float, default=.5)
 @click.option('--release', is_flag=True, default=False)
 @click.option('--approve', is_flag=True, default=False)
+@click.option('--approve-all', is_flag=True, default=False)
+@click.option('--reject', is_flag=True, default=False)
+@click.option('--reject_reason', type=str,
+              default="Unfortunately, we had to reject your work because you have not passed our attention checks.")
 @click.option('--qualify', is_flag=True, default=False)
 @click.option('--save-workers', is_flag=True, default=False)
 @click.option('--dry', is_flag=True, default=False)
 @click.option('--qualification-id', type=str, default='307M1J5IK9LLYXT6DC6297RO8PMME8')  # uom-factchecker (smaite)
 def main(infile, log_level, answer_fields, qualified_workers_file, processed_assignments, qualification_threshold,
-         release, approve, qualify, qualification_id, save_workers, dry):
+         release, approve, approve_all, qualify, qualification_id, save_workers, dry, reject, reject_reason):
     endpoint_url = 'https://mturk-requester-sandbox.us-east-1.amazonaws.com' if not release else 'https://mturk-requester.us-east-1.amazonaws.com'
 
     assert AWS_ACCESS_KEY_ID, AWS_ACCESS_KEY_ID
@@ -104,8 +108,7 @@ def main(infile, log_level, answer_fields, qualified_workers_file, processed_ass
             in group if not bool(item['Input.corrupt'])
         ]
 
-        logger.debug(all_corrupted)
-        logger.debug(all_uncorrupted)
+        logger.debug(f"corrupted ratings: {all_corrupted}. uncorrupted ratings: {all_uncorrupted}.")
         if all_corrupted and all_uncorrupted:
             worker_acc_corrupted[w] = sum(all_corrupted) / len(all_corrupted)
             worker_acc_uncorrupted[w] = sum(all_uncorrupted) / len(all_uncorrupted)
@@ -121,6 +124,11 @@ def main(infile, log_level, answer_fields, qualified_workers_file, processed_ass
     # disqualify non-qualified and non-pending workers
     disqualified_workers = [k for k, v in worker_acc_corrupted.items() if
                             k not in qualified_workers and k not in pending_workers]
+
+    logger.info(f"{len(qualified_workers)} qualified.")
+    logger.info(f"{len(disqualified_workers)} disqualified.")
+    logger.info(f"{len(pending_workers)} pending.")
+
     mturk = boto3.client(
         'mturk',
         aws_access_key_id=AWS_ACCESS_KEY_ID,
@@ -139,7 +147,9 @@ def main(infile, log_level, answer_fields, qualified_workers_file, processed_ass
         # reject all disqualified workers and do not grant qualification, approve otherwise
         logger.info("Approving hits")
         for d in tqdm(results):  # approve/reject
-            if d['AssignmentStatus'] == 'Submitted':
+            correct_status = d['AssignmentStatus'] == 'Submitted'
+            worker_did_good_job = d['WorkerId'] in qualified_workers or d['WorkerId'] in pending_workers
+            if correct_status and (approve_all or worker_did_good_job):
                 if d['AssignmentId'] not in already_processed:
                     try:
                         if not dry:
@@ -151,7 +161,23 @@ def main(infile, log_level, answer_fields, qualified_workers_file, processed_ass
                     already_processed.append(d['AssignmentId'])
                 else:
                     logger.debug(f"{d['AssignmentId']} was already processed!")
-
+    if reject and not approve_all:
+        # reject all disqualified workers and do not grant qualification, approve otherwise
+        logger.info("Rejecting hits")
+        for d in tqdm(results):  # approve/reject
+            if d['AssignmentStatus'] == 'Submitted':
+                if d['AssignmentId'] not in already_processed:
+                    try:
+                        if not dry:
+                            mturk.reject_assignment(AssignmentId=d['AssignmentId'],
+                                                    RequesterFeedback=reject_reason)
+                        logger.debug(f"Reject {d['AssignmentId']} ({'live' if not dry else 'dry'})")
+                    except RequestError as e:
+                        if "This operation can be called with a status of: Submitted" in str(e):
+                            logger.debug(f"{d['AssignmentId']} was already approved!")
+                    already_processed.append(d['AssignmentId'])
+                else:
+                    logger.debug(f"{d['AssignmentId']} was already processed!")
     if qualify:
         # approve all qualified and grant qualification == 100*worker_acc
         logger.info("Qualifying workers")
