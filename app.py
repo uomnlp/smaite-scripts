@@ -17,12 +17,9 @@ if __name__ == '__main__':
     with open(file_name, 'r') as f:
         workers = set(l for l in f.read().splitlines() if l)
     
-    @app.route('/')
-    def get_workers():
+    @app.route('/save', methods=['POST'])
+    def save_workers():
         worker = request.args.get("worker_id", None)
-        if worker:
-            return json.dumps(worker in workers)
-        worker = request.args.get("save_worker_id", None)
         key = request.args.get("key", None)
         if worker and key:
             if key != auth_key:
@@ -33,6 +30,14 @@ if __name__ == '__main__':
                 workers.add(worker)
                 return "true"
         return "false"
+
+    @app.route('/', methods=['GET'])
+    def get_workers():
+        worker = request.args.get("worker_id", None)
+        if worker:
+            return json.dumps(worker in workers)
+        else:
+            return json.dumps(False)
 
     
 
