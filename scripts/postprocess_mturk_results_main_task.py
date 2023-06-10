@@ -14,8 +14,17 @@ import requests
 from unidecode import unidecode
 from urllib3.exceptions import RequestError
 from dotenv import load_dotenv
+from collections import defaultdict
 
 load_dotenv()
+
+
+def maybe_bool(b):
+    if b == '1':
+        return True
+    if b == '2':
+        return False
+    return maybe_int(b)
 
 def maybe_int(i):
     try:
@@ -24,140 +33,121 @@ def maybe_int(i):
         return i
 
 
-def postprocess_answer(answers, *fields, num=(1,11)):
+def postprocess_answer(answers, *fields, num=(1, 11)):
     print(answers)
+    print([[(k,v) for k, v in answers[f"{f}{i}"].items() if v] for f in fields for i in range(*num)])
     return {
-        f"{f}_{i}": next(maybe_int(k) for k, v in answers[f"{f}{i}"].items() if v) for f in fields for i in range(*num)
+        f"{f}_{i}": next((maybe_bool(k) if len(answers[f"{f}{i}"]) == 2 else maybe_int(k) for k, v in answers[f"{f}{i}"].items() if v),-1) for f in fields for i in range(*num)
     }
 
 
-AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
-AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
 
 
-def process_worker_answers(r: Dict[str, Any], answer_fields, batch_size=10):
-    num = list(range(1,batch_size+1))
-    worker_answers = postprocess_answer(json.loads(r['Answer.taskAnswers'])[0], *answer_fields, num=(1,batch_size+1))
-    corrupt_indices = {i for i in num if bool(r[f'Input.corrupt{i}'])}
-    uncorrupt_indices = {i for i in num if not bool(r[f'Input.corrupt{i}'])}
-    corrupt_score = sum(worker_answers[f'rate_{i}'] for i in corrupt_indices)/len(corrupt_indices)
-    uncorrupt_score = sum(worker_answers[f'rate_{i}'] for i in uncorrupt_indices)/len(uncorrupt_indices)
-    return (uncorrupt_score/corrupt_score) * 10
-    
+def process_worker_answers(r: Dict[str, Any], answer_fields):
+    worker_answers = postprocess_answer(
+        json.loads(r["Answer.taskAnswers"])[0], *answer_fields, num=(1, 2)
+    )
+    return worker_answers
+
 
 @click.command()
-@click.argument('infile', default=sys.stdin)
-@click.option('--log-level', default='INFO')
-@click.option('--answer-fields', '-af', default='rate,verdict')
+@click.argument("infile", default=sys.stdin)
+@click.argument("outfile", type=str)
+@click.option("--log-level", default="INFO")
+@click.option("--answer-fields", "-af", default="contra-article,contra-self,rate,verdict,convince,new")
 @click.option("--processed-assignments", '-pa', type=click.Path(file_okay=True, dir_okay=False),
-              default='processed.json')
-@click.option('--bonus-threshold', '-bt', type=float, default=20)
-@click.option('--bonus-value', '-bv', type=str, default="3")
-@click.option('--release', is_flag=True, default=False)
-@click.option('--batch-size', type=int, default=10)
-@click.option('--reject', is_flag=True, default=False)
-@click.option('--reject-threshold', '-rt', type=float, default=10)
-@click.option('--reject-reason', type=str,
-              default="Unfortunately, we had to reject your work because you have not passed our attention checks.")
-@click.option('--qualify', is_flag=True, default=False)
-@click.option('--dry', is_flag=True, default=False)
-@click.option('--qualification-id', type=str, default=None)  # uom-factchecker (smaite)
-def main(infile, log_level, answer_fields, processed_assignments, bonus_threshold, bonus_value, reject_threshold,
-         release, qualify, batch_size, qualification_id,  dry, reject, reject_reason):
+              default='processed-main.json')
+@click.option("--release", is_flag=True, default=False)
+@click.option("--dry", is_flag=True, default=False)
+def main(infile, outfile, processed_assignments, log_level, answer_fields, release, dry):
+    endpoint_url = (
+        "https://mturk-requester-sandbox.us-east-1.amazonaws.com"
+        if not release
+        else "https://mturk-requester.us-east-1.amazonaws.com"
+    )
 
-    endpoint_url = 'https://mturk-requester-sandbox.us-east-1.amazonaws.com' if not release else 'https://mturk-requester.us-east-1.amazonaws.com'
-    qualification_id = qualification_id or '326R1R7QBNKEROUUN5FYJ8S4IH3BXP' if not release else '37RMV253NRB0PWFY6AWN5NOUUNUL8U'
-
-    AWS_ACCESS_KEY_ID = os.environ.get('AWS_ACCESS_KEY_ID')
-    AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY")
     assert AWS_ACCESS_KEY_ID, AWS_ACCESS_KEY_ID
     assert AWS_SECRET_ACCESS_KEY, AWS_SECRET_ACCESS_KEY
     logger.remove(0)
     logger.add(sys.stderr, level=log_level)
     logger.debug(infile)
 
-    if dry: 
+    if dry:
         path, ext = os.path.splitext(processed_assignments)
         processed_assignments = f"{path}-dry{ext}"
 
     if not os.path.exists(processed_assignments):
         logger.warning(f"Processed Assignments file doesn't exist: `{processed_assignments}`.")
-        with open(processed_assignments, 'w+') as f:
+        with open(processed_assignments, "w+") as f:
             json.dump([], f)
 
-    answer_fields = answer_fields.split(',')
-    results: List[Dict] = [d for d in pd.read_csv(infile).fillna(0).to_dict(orient='records')]
-    
-    with open(processed_assignments, 'r') as f:
-            processed = json.load(f)
+    answer_fields = answer_fields.split(",")
+    results: List[Dict] = [d for d in pd.read_csv(infile).fillna(0).to_dict(orient="records")]
 
-    processed_hits = set(p['assignment_id'] for p in processed)
+    with open(processed_assignments, "r") as f:
+        processed = json.load(f)
 
-    processed_worker_ids = set(p['worker_id'] for p in processed)
+    processed_hits = set(p["assignment_id"] for p in processed)
+
 
     mturk = boto3.client(
-        'mturk',
+        "mturk",
         aws_access_key_id=AWS_ACCESS_KEY_ID,
         aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-        region_name='us-east-1',
-        endpoint_url=endpoint_url
+        region_name="us-east-1",
+        endpoint_url=endpoint_url,
     )
-
+    output = defaultdict(dict)
     for r in tqdm(results):
         # if assignment id not processed already
-        assignment_id = r['AssignmentId']
-        worker_id = r['WorkerId']
-        is_reject = False
-        is_bonus = False
+        assignment_id = r["AssignmentId"]
+        worker_id = r["WorkerId"]
 
-        if worker_id in processed_worker_ids:
-            continue
         if assignment_id in processed_hits:
             continue
 
-        qual_score = process_worker_answers(r, answer_fields, batch_size=batch_size)
-        print(qual_score)
+        ans = process_worker_answers(r, answer_fields)
+        ans['worker'] = worker_id
+        hit_id = r['HITId']
         
+        p = output[hit_id]
+        if not p:
+            d = {c: r[f'Input.{c}'] for c in ("claim","verdict","text",'sources')}
+            d['text'] = d['text'].replace('<br />', '\n')
+            d['sources'] = d['sources'].split(', ')
+            d['answers'] = []
+            d['hit_id'] = hit_id
+            output[hit_id] = d
+            p = output[hit_id]
 
-        if reject and qual_score < reject_threshold:
-            # reject
-            is_reject = True
-            if not dry:
-                mturk.reject_assignment(AssignmentId=r['AssignmentId'], RequesterFeedback=reject_reason)
-            else:
-                logger.info(f"Rejecting {assignment_id} from {worker_id}: {reject_reason}")
+        p['answers'].append(ans)
+            
+        if not dry:
+                mturk.approve_assignment(AssignmentId=r["AssignmentId"], RequesterFeedback="thank you!")
         else:
-            if not dry:
-                mturk.approve_assignment(AssignmentId=r['AssignmentId'], RequesterFeedback='thank you!')
-                mturk.associate_qualification_with_worker(QualificationTypeId=qualification_id, WorkerId=worker_id,
-                                                          IntegerValue=int(qual_score))
-            else:
                 logger.info(f"Accepting {assignment_id} from worker {worker_id}!")
-                logger.info(f"Associating {qualification_id}:{int(qual_score)} with worker {worker_id}!")
-        if qual_score >= bonus_threshold:
-            is_bonus = True
-            if not dry:
-                mturk.send_bonus(
-                                WorkerId=worker_id,
-                                BonusAmount=bonus_value,
-                                AssignmentId=assignment_id,
-                                Reason='Well done! Your score qualifies you for a bonus.',
-                                UniqueRequestToken=worker_id+assignment_id
-                            )
-            else:
-                logger.info(f"Paying ${bonus_value} to worker {worker_id} for {assignment_id}!")
-        processed.append({
-            "assignment_id": assignment_id,
-            "worker_id": worker_id,
-            "qual_score": qual_score,
-            "is_reject": is_reject,
-            "is_bonus": is_bonus
-        })
+        
+        processed.append(
+            {
+                "assignment_id": assignment_id,
+                "hit_id": hit_id,
+                "worker_id": worker_id
+            }
+        )
+    output = [v for _, v in output.items()]
+    with open(outfile, "w+") as f:
+        f.write('\n'.join(json.dumps(o) for o in output))
 
-    with open(processed_assignments, 'w+') as f:
-            json.dump(processed, f)
+    # with open(processed_assignments, "w+") as f:
+    #     json.dump(processed, f)
 
-        # save: assignment id, worker id, score, isBonus, isAccepted
+
+
+    # save: assignment id, worker id, score, isBonus, isAccepted
     # assert False
 
     # for i, (key, group) in enumerate(grouped_by_input):
@@ -280,5 +270,5 @@ def main(infile, log_level, answer_fields, processed_assignments, bonus_threshol
     # # TODO: get average worker disagreement
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

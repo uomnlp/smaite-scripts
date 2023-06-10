@@ -292,7 +292,7 @@ def render(i):
                     <tr>
                         <td><input type="radio" id="false{i}" name="verdict{i}" value="false"><label htmlFor="false{i}">False</label>
                         </td>
-                        <td><input type="radio" id="misleading{i}" name="verdict{i}" value="misleading"><label htmlFor="misleading{i}">Misleading</label></td>
+                        
                     </tr>
                     <tr>
                         <td><input type="radio" id="satire{i}" name="verdict{i}" value="satire"><label htmlFor="satire{i}">Satire</label></td>
