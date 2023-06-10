@@ -1,0 +1,14 @@
+python classify.py \
+  --model_name_or_path bert-base-cased \
+  --train_file data-main-no-answers.json \
+  --validation_file data-main-no-answers.json \
+  --do_train \
+  --label_column rate_1@0.75 \
+  --input_column claim verdict text \
+  --max_seq_length 128 \
+  --per_device_train_batch_size 1 \
+  --learning_rate 2e-5 \
+  --num_train_epochs 3 \
+  --output_dir /tmp/test/ \
+  --no_cuda \
+  --max_train_samples 3 \
